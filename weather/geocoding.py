@@ -35,6 +35,13 @@ COUNTRY_CODE_ALIASES = {
 }
 
 
+def _fetch_results(name: str, count: int = 10) -> list[dict]:
+    params = {"name": name, "count": count, "language": "en", "format": "json"}
+    response = session.get(GEOCODING_URL, params=params, timeout=30)
+    response.raise_for_status()
+    return response.json().get("results", [])
+
+
 def _country_matches(result: dict, want: str) -> bool:
     want = want.strip().lower()
     code = want.upper() if len(want) == 2 else COUNTRY_CODE_ALIASES.get(want)
