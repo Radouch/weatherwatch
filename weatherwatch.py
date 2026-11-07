@@ -4,6 +4,7 @@ import sys
 import json
 import logging
 import signal
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -24,6 +25,13 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 CONFIG_PATH = os.environ.get("WEATHERWATCH_CONFIG", "config.json")
+
+# Package version from pyproject.toml; "dev" when run from the source tree
+# without a package installation.
+try:
+    __version__ = package_version("weatherwatch")
+except PackageNotFoundError:
+    __version__ = "dev"
 
 
 @dataclass
@@ -254,7 +262,7 @@ class WeatherWatch:
                 self.last_update_id = latest
                 self._save_update_offset()
 
-        logger.info("WeatherWatch started")
+        logger.info("WeatherWatch started (v%s)", __version__)
 
         while self.running:
             self.scheduler.run_pending()

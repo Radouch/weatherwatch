@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "weatherwatch"
+version = "0.1.0"
+description = "Telegram bot pushing Open-Meteo weather reports for a few selected places"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Radouch", email = "radek.svitil@volny.cz" }]
+classifiers = ["Private :: Do Not Upload"]
+dependencies = [
+    "requests>=2.28.0",
+    "schedule>=1.2.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+weatherwatch = "weatherwatch:main"
+
+[tool.setuptools]
+# Explicit so multi-top-level flat layout (~weather, ~telegram, ~scheduler)
+# is included deterministically, plus the main script as a module.
+packages = ["weather", "telegram", "scheduler"]
+py-modules = ["weatherwatch"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

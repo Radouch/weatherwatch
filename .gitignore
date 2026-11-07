@@ -4,6 +4,9 @@
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+build/
+dist/
 
 # Virtualenv (Odroid/ARM) and tool caches
 .venv/
