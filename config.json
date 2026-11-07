@@ -1,0 +1,45 @@
+{
+  "places": [
+    {
+      "name": "Prague",
+      "city": "Prague",
+      "country": "Czech Republic"
+    },
+    {
+      "name": "Loužnice",
+      "city": "Loužnice",
+      "country": "Czech Republic"
+    },
+    {
+      "name": "Bystřice (BN)",
+      "city": "Bystřice",
+      "admin1": "Středočeský kraj",
+      "country": "Czech Republic"
+    }
+  ],
+  "schedule": [
+    "06:45"
+  ],
+  "current_weather": [
+    "temperature_2m",
+    "relative_humidity_2m",
+    "wind_speed_10m",
+    "precipitation",
+    "rain",
+    "snowfall"
+  ],
+  "forecast": [
+    "temperature_2m_min",
+    "temperature_2m_max",
+    "precipitation_probability_max",
+    "precipitation_sum",
+    "rain_sum",
+    "snowfall_sum"
+  ],
+  "forecast_days": 3,
+  "units": {
+    "temperature": "celsius",
+    "wind_speed": "kmh",
+    "precipitation": "mm"
+  }
+}

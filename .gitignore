@@ -1,0 +1,14 @@
+# Environment variables: real credentials (bot token) - never commit
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtualenv (Odroid/ARM) and tool caches
+.venv/
+.ruff_cache/
+
+# Editors/OS noise
+*.swp
+.DS_Store
