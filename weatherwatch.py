@@ -5,10 +5,8 @@ import json
 import logging
 import signal
 from pathlib import Path
-from datetime import datetime
 from dataclasses import dataclass
 
-import requests
 import schedule
 from dotenv import load_dotenv
 
@@ -51,7 +49,12 @@ class WeatherWatch:
         self.authorized_chat_id = str(self.config["chat_id"])
         self.scheduler = TimeScheduler(self.config.get("schedule", []))
         self.running = True
-        self.last_update_id = 0
+
+        state_dir = Path(os.environ.get("WEATHERWATCH_STATE_DIR", "state"))
+        self.update_offset_file = state_dir / "telegram_offset"
+        # Persisted offset: Telegram replays undelivered updates (up to 24h
+        # old) after a restart, so we resume where we left off.
+        self.last_update_id = self._load_update_offset()
 
     def load_config(self, path: str) -> dict:
         config_file = Path(path)
@@ -118,12 +121,28 @@ class WeatherWatch:
             places.append(place)
         return places
 
+    def _load_update_offset(self) -> int:
+        try:
+            return int(self.update_offset_file.read_text().strip())
+        except (OSError, ValueError):
+            return 0
+
+    def _save_update_offset(self) -> None:
+        """Persist the Telegram update offset atomically (tmp + rename)."""
+        try:
+            self.update_offset_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp_file = self.update_offset_file.with_suffix(".tmp")
+            tmp_file.write_text(str(self.last_update_id))
+            tmp_file.replace(self.update_offset_file)
+        except OSError as e:
+            logger.warning("Could not persist Telegram update offset: %s", e)
+
     def test_telegram(self) -> bool:
         try:
-            response = self.api_request("getMe")
-            logger.info(f"Telegram bot verified: @{response['result']['username']}")
+            response = self.telegram.request("getMe")
+            logger.info("Telegram bot verified: @%s", response["result"]["username"])
 
-            response = self.api_request("getWebhookInfo")
+            response = self.telegram.request("getWebhookInfo")
             if response.get("result", {}).get("url"):
                 logger.warning("Bot has webhook set - polling won't work!")
                 return False
@@ -131,40 +150,25 @@ class WeatherWatch:
             logger.info("Telegram bot is ready (no webhook set)")
             return True
         except Exception as e:
-            logger.error(f"Telegram test failed: {self._mask(str(e))}")
+            logger.error("Telegram test failed: %s", self.telegram.mask(str(e)))
             return False
 
-    def _mask(self, text: str) -> str:
-        """Redact the bot token from error texts before logging.
-
-        requests/urllib3 connection errors embed the full API URL path, which
-        contains the bot token, so raw exception text must never hit the logs.
-        """
-        token = self.config.get("telegram_token", "")
-        return text.replace(token, "<redacted>") if token else text
+    def _skip_pending_updates(self) -> int:
+        """First start: jump to the newest update so an old backlog (e.g.
+        accumulated while the service was down) is not replayed."""
+        try:
+            # offset = -1 returns just the latest update
+            updates = self.telegram.request(
+                "getUpdates", {"offset": -1, "timeout": 0}
+            ).get("result", [])
+            return updates[-1]["update_id"] if updates else 0
+        except Exception as e:
+            logger.warning("Cannot skip pending updates: %s", self.telegram.mask(str(e)))
+            return 0
 
     def setup_telegram_bot(self):
-        self.telegram_bot_token = self.config["telegram_token"]
-        self.api_url = f"https://api.telegram.org/bot{self.telegram_bot_token}"
-
         if not self.test_telegram():
             logger.warning("Telegram bot may not receive commands - check for webhooks")
-
-    def api_request(
-        self,
-        method: str,
-        data: dict | None = None,
-        request_timeout: float | tuple[float, float] = 10,
-    ) -> dict:
-        url = f"{self.api_url}/{method}"
-        logger.debug(f"API request: {method}")
-        response = requests.post(url, json=data or {}, timeout=request_timeout)
-        if response.status_code != 200:
-            logger.warning(
-                f"API error {response.status_code}: {self._mask(response.text)}"
-            )
-        response.raise_for_status()
-        return response.json()
 
     def get_weather(self, place: Place) -> WeatherData:
         current = self.weather_source.get_current(
@@ -199,15 +203,13 @@ class WeatherWatch:
 
     def handle_telegram_updates(self):
         try:
-            response = self.api_request(
-                "getUpdates",
-                {"offset": self.last_update_id + 1, "timeout": 10},
-                request_timeout=(5, 15),
-            )
+            response = self.telegram.get_updates(self.last_update_id + 1)
             updates = response.get("result", [])
 
-            if updates:
-                logger.info(f"Received {len(updates)} Telegram updates")
+            if not updates:
+                return
+
+            logger.info("Received %d Telegram updates", len(updates))
 
             for update in updates:
                 self.last_update_id = max(self.last_update_id, update["update_id"])
@@ -229,29 +231,28 @@ class WeatherWatch:
                 if text == "/weather":
                     logger.info("Processing /weather command")
                     self.send_weather_update()
-                    self.api_request(
-                        "sendMessage",
-                        {
-                            "chat_id": chat_id,
-                            "text": "Weather update sent!",
-                        },
-                    )
+                    self.telegram.send("Weather update sent!")
                 elif text == "/start":
-                    self.api_request(
-                        "sendMessage",
-                        {
-                            "chat_id": chat_id,
-                            "text": "WeatherWatch bot is running! Use /weather to get current weather.",
-                        },
+                    self.telegram.send(
+                        "WeatherWatch bot is running! Use /weather to get current weather."
                     )
+
+            self._save_update_offset()
         except Exception as e:
-            logger.warning(f"Telegram polling error: {self._mask(str(e))}")
+            logger.warning("Telegram polling error: %s", self.telegram.mask(str(e)))
 
     def run(self):
         self.setup()
 
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
+
+        if self.last_update_id == 0:
+            # No state yet: skip any stale backlog instead of replaying it.
+            latest = self._skip_pending_updates()
+            if latest:
+                self.last_update_id = latest
+                self._save_update_offset()
 
         logger.info("WeatherWatch started")
 
@@ -262,6 +263,7 @@ class WeatherWatch:
     def _signal_handler(self, sig, frame):
         logger.info("Shutting down...")
         self.running = False
+        self._save_update_offset()
 
 
 def main():

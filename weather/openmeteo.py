@@ -25,6 +25,38 @@ ATTRIBUTE_NAMES = {
 
 
 class OpenMeteoSource(WeatherSource):
+    # Unit handling: Open-Meteo only supports global unit options per request
+    # (e.g. temperature_unit=fahrenheit). Per-variable names such as
+    # temperature_2m_unit=... are silently ignored and the response keeps
+    # default units - so variables must be mapped to their unit category.
+    PARAM_UNIT_CATEGORIES = {
+        "temperature_2m": "temperature",
+        "temperature_2m_max": "temperature",
+        "temperature_2m_min": "temperature",
+        "temperature_2m_mean": "temperature",
+        "apparent_temperature": "temperature",
+        "apparent_temperature_max": "temperature",
+        "apparent_temperature_min": "temperature",
+        "dew_point_2m": "temperature",
+        "wind_speed_10m": "wind_speed",
+        "wind_speed_10m_max": "wind_speed",
+        "wind_gusts_10m": "wind_speed",
+        "wind_gusts_10m_max": "wind_speed",
+        "precipitation": "precipitation",
+        "precipitation_sum": "precipitation",
+        "rain": "precipitation",
+        "rain_sum": "precipitation",
+        "showers": "precipitation",
+        "snowfall": "snowfall",
+        "snowfall_sum": "snowfall",
+    }
+    UNIT_PARAMS = {
+        "temperature": "temperature_unit",
+        "wind_speed": "wind_speed_unit",
+        "precipitation": "precipitation_unit",
+        "snowfall": "snowfall_unit",
+    }
+
     def __init__(self, units: dict | None = None):
         self.units = units or {}
 
@@ -35,9 +67,8 @@ class OpenMeteoSource(WeatherSource):
             return None
 
         url = "https://api.open-meteo.com/v1/forecast"
-        weather_code = self._get_weather_code(lat, lon)
-        current_params = params + ["weather_code"]
-        current_params = list(set(current_params))
+        # weather_code is requested together with the other current params
+        current_params = list(set(params + ["weather_code"]))
 
         params_dict = {
             "latitude": lat,
@@ -54,9 +85,6 @@ class OpenMeteoSource(WeatherSource):
             return None
 
         current_data = data["current"]
-        if weather_code:
-            current_data["weather_code"] = weather_code
-
         return CurrentWeather(data=current_data)
 
     def get_forecast(
@@ -97,38 +125,14 @@ class OpenMeteoSource(WeatherSource):
         return forecasts
 
     def _build_unit_params(self, params: list[str]) -> dict:
-        unit_map = {
-            "temperature_2m": "temperature_2m",
-            "temperature_2m_max": "temperature_2m_max",
-            "temperature_2m_min": "temperature_2m_min",
-            "wind_speed_10m": "wind_speed_10m",
-            "precipitation": "precipitation",
-            "precipitation_probability_max": "precipitation_probability_max",
-        }
+        """Map requested variables to the API's global unit parameters."""
+        requested = {self.PARAM_UNIT_CATEGORIES.get(p) for p in params} - {None}
         units = {}
-        for param, api_param in unit_map.items():
-            if param in params:
-                unit = self.units.get(param.split("_")[0], "celsius")
-                if param.startswith("temperature"):
-                    units[f"{api_param}_unit"] = unit
-                elif param.startswith("wind"):
-                    wind_unit = self.units.get("wind_speed", "kmh")
-                    units[f"{api_param}_unit"] = wind_unit
-                elif param.startswith("precipitation"):
-                    units[f"{api_param}_unit"] = self.units.get("precipitation", "mm")
+        for category in sorted(requested):
+            unit = self.units.get(category)
+            if unit:
+                units[self.UNIT_PARAMS[category]] = unit
         return units
-
-    def _get_weather_code(self, lat: float, lon: float) -> int | None:
-        url = "https://api.open-meteo.com/v1/forecast"
-        params = {"latitude": lat, "longitude": lon, "current": "weather_code"}
-        try:
-            response = session.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("current", {}).get("weather_code")
-        except Exception:
-            return None
-
 
 def format_weather_code(code: int) -> str:
     codes = {

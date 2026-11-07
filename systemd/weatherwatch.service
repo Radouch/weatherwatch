@@ -9,6 +9,10 @@ User=radek
 Group=radek
 WorkingDirectory=/home/radek/weatherwatch
 ExecStart=/home/radek/weatherwatch/.venv/bin/python /home/radek/weatherwatch/weatherwatch.py
+# Telegram update-offset state; created and writable despite
+# ProtectSystem=strict / ProtectHome=read-only.
+Environment=WEATHERWATCH_STATE_DIR=/var/lib/weatherwatch
+StateDirectory=weatherwatch
 Restart=on-failure
 RestartSec=60
 StandardOutput=journal

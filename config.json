@@ -3,18 +3,18 @@
     {
       "name": "Prague",
       "city": "Prague",
-      "country": "Czech Republic"
+      "country": "Czechia"
     },
     {
       "name": "Loužnice",
       "city": "Loužnice",
-      "country": "Czech Republic"
+      "country": "Czechia"
     },
     {
       "name": "Bystřice (BN)",
       "city": "Bystřice",
-      "admin1": "Středočeský kraj",
-      "country": "Czech Republic"
+      "admin1": "Central Bohemia",
+      "country": "Czechia"
     }
   ],
   "schedule": [

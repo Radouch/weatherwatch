@@ -1,6 +1,13 @@
+import logging
+
 import requests
-from datetime import datetime
-from weather.base import WeatherData, CurrentWeather, ForecastDay
+from datetime import datetime, timedelta
+
+from weather.base import WeatherData
+from weather.openmeteo import format_weather_code
+
+
+logger = logging.getLogger(__name__)
 
 
 ATTRIBUTE_LABELS = {
@@ -40,19 +47,65 @@ ATTRIBUTE_LABELS = {
 }
 
 
+def escape_markdown(text: str) -> str:
+    """Escape Telegram legacy-Markdown control characters in dynamic text.
+
+    Without this, a location name containing e.g. "_" makes the whole message
+    fail the parser and it is silently dropped.
+    """
+    for ch in ("\\", "_", "*", "[", "`"):
+        text = text.replace(ch, "\\" + ch)
+    return text
+
+
 class TelegramSender:
+    """Single entry point for Telegram Bot API calls."""
+
     def __init__(self, token: str, chat_id: str):
         self.token = token
         self.chat_id = chat_id
         self.api_url = f"https://api.telegram.org/bot{token}"
 
+    def mask(self, text: str) -> str:
+        """Redact the bot token from texts before logging.
+
+        requests/urllib3 connection errors embed the full API URL path, which
+        contains the token, so raw exception text must never hit the logs.
+        """
+        return text.replace(self.token, "<redacted>") if self.token else text
+
+    def request(
+        self,
+        method: str,
+        data: dict | None = None,
+        timeout: float | tuple[float, float] = (5, 15),
+    ) -> dict:
+        url = f"{self.api_url}/{method}"
+        logger.debug("Telegram API request: %s", method)
+        response = requests.post(url, json=data or {}, timeout=timeout)
+        if response.status_code != 200:
+            logger.warning(
+                "Telegram API error %s: %s",
+                response.status_code,
+                self.mask(response.text),
+            )
+        response.raise_for_status()
+        return response.json()
+
+    def get_updates(self, offset: int, server_timeout: int = 10) -> dict:
+        return self.request(
+            "getUpdates", {"offset": offset, "timeout": server_timeout}
+        )
+
     def send(self, text: str) -> bool:
-        url = f"{self.api_url}/sendMessage"
-        payload = {"chat_id": self.chat_id, "text": text, "parse_mode": "Markdown"}
         try:
-            response = requests.post(url, json=payload, timeout=10)
-            return response.status_code == 200
-        except Exception:
+            self.request(
+                "sendMessage",
+                {"chat_id": self.chat_id, "text": text, "parse_mode": "Markdown"},
+            )
+            return True
+        except Exception as e:
+            logger.warning("Telegram send error: %s", self.mask(str(e)))
             return False
 
     def send_weather(self, weather: WeatherData) -> bool:
@@ -61,7 +114,7 @@ class TelegramSender:
 
     def format_weather_message(self, weather: WeatherData) -> str:
         lines = []
-        location = weather.location
+        location = escape_markdown(weather.location)
         date_str = datetime.now().strftime("%a %b %d, %Y")
         lines.append(f"🌤️ *{location} Weather* - {date_str}\n")
 
@@ -72,8 +125,6 @@ class TelegramSender:
                     value = weather.current.data[param]
                     label, unit, emoji = label_unit_emoji
                     if param == "weather_code":
-                        from weather.openmeteo import format_weather_code
-
                         value_str = format_weather_code(value)
                         lines.append(f"{emoji} {label}: {value_str}")
                     elif param == "is_day":
@@ -93,18 +144,12 @@ class TelegramSender:
                         value = day.data[param]
                         label, unit, emoji = label_unit_emoji
                         if param == "weather_code":
-                            from weather.openmeteo import format_weather_code
-
                             value_str = format_weather_code(value)
                             lines.append(f"{emoji} {label}: {value_str}")
                         elif param in ("sunrise", "sunset"):
                             lines.append(f"{emoji} {label}: {value}")
-                        elif param == "daylight_duration":
-                            hours = value / 3600
-                            lines.append(f"{emoji} {label}: {hours:.1f}h")
-                        elif param == "sunshine_duration":
-                            hours = value / 3600
-                            lines.append(f"{emoji} {label}: {hours:.1f}h")
+                        elif param in ("daylight_duration", "sunshine_duration"):
+                            lines.append(f"{emoji} {label}: {value / 3600:.1f}h")
                         else:
                             lines.append(f"{emoji} {label}: {value}{unit}")
                 lines.append("")
@@ -113,14 +158,12 @@ class TelegramSender:
 
     def _format_day_name(self, date_str: str) -> str:
         try:
-            dt = datetime.strptime(date_str, "%Y-%m-%d")
-            today = datetime.now()
-            if dt.date() == today.date():
+            day = datetime.strptime(date_str, "%Y-%m-%d").date()
+            today = datetime.now().date()
+            if day == today:
                 return "Today"
-            elif dt.date() == today.date().__add__(
-                __import__("datetime").timedelta(days=1)
-            ):
+            if day == today + timedelta(days=1):
                 return "Tomorrow"
-            return dt.strftime("%a")
+            return day.strftime("%a")
         except Exception:
             return date_str

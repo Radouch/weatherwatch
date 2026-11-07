@@ -29,7 +29,3 @@ class TimeScheduler:
     def run_pending(self):
         schedule.run_pending()
         time.sleep(1)
-
-    def should_send_now(self, times: list[str]) -> bool:
-        now = datetime.now().strftime("%H:%M")
-        return now in times
